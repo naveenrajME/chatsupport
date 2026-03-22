@@ -2,6 +2,7 @@ import aiosmtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from datetime import datetime
+from typing import Optional
 import os
 
 
@@ -13,6 +14,15 @@ def _status_badge_style(status: str) -> str:
         "Closed": "background:#d1fae5;color:#065f46;",
     }
     return styles.get(status, "background:#f3f4f6;color:#374151;")
+
+
+def _resolve_email(ticket: dict) -> Optional[str]:
+    """Return the best email address for a ticket, or None if not available."""
+    if ticket.get("contactType") == "email" and ticket.get("contact"):
+        return ticket["contact"]
+    if ticket.get("secondContactType") == "email" and ticket.get("secondContact"):
+        return ticket["secondContact"]
+    return None
 
 
 async def _send(to: str, subject: str, html: str):
@@ -77,12 +87,11 @@ async def send_ticket_created_email(ticket: dict):
         </div>
         """
 
-        to_email = (
-            ticket["contact"]
-            if ticket["contactType"] == "email"
-            else os.getenv("EMAIL_USERNAME")
-        )
-        await _send(to_email, f"[{ticket['ticketId']}] Your support ticket has been created", html)
+        to_email = _resolve_email(ticket)
+        if to_email:
+            await _send(to_email, f"[{ticket['ticketId']}] Your support ticket has been created", html)
+        else:
+            print(f"No email address for ticket {ticket['ticketId']} — skipping created email")
     except Exception as e:
         print(f"Ticket created email error: {e}")
 
@@ -138,11 +147,10 @@ async def send_ticket_status_email(ticket: dict):
         </div>
         """
 
-        to_email = (
-            ticket["contact"]
-            if ticket["contactType"] == "email"
-            else os.getenv("EMAIL_USERNAME")
-        )
-        await _send(to_email, f"[{ticket['ticketId']}] Ticket status updated to: {status}", html)
+        to_email = _resolve_email(ticket)
+        if to_email:
+            await _send(to_email, f"[{ticket['ticketId']}] Ticket status updated to: {status}", html)
+        else:
+            print(f"No email address for ticket {ticket['ticketId']} — skipping status email")
     except Exception as e:
         print(f"Status update email error: {e}")

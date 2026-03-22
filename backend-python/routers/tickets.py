@@ -36,11 +36,11 @@ ALLOWED_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads")
 
 
-async def generate_ticket_id(db) -> str:
-    last = await db["tickets"].find_one({}, sort=[("createdAt", -1)])
+async def generate_ticket_id(conn) -> str:
+    row = await conn.fetchrow("SELECT ticket_id FROM tickets ORDER BY created_at DESC LIMIT 1")
     next_num = 1
-    if last and last.get("ticketId"):
-        parts = last["ticketId"].split("-")
+    if row and row["ticket_id"]:
+        parts = row["ticket_id"].split("-")
         try:
             next_num = int(parts[-1]) + 1
         except ValueError:
@@ -48,9 +48,23 @@ async def generate_ticket_id(db) -> str:
     return f"TK-SAAFE-{str(next_num).zfill(3)}"
 
 
-def serialize(ticket: dict) -> dict:
-    ticket["_id"] = str(ticket["_id"])
-    return ticket
+def serialize(row) -> dict:
+    return {
+        "_id": str(row["id"]),
+        "ticketId": row["ticket_id"],
+        "issueDescription": row["issue_description"],
+        "contact": row["contact"],
+        "contactType": row["contact_type"],
+        "secondContact": row["second_contact"],
+        "secondContactType": row["second_contact_type"],
+        "userName": row["user_name"],
+        "status": row["status"],
+        "notes": row["notes"],
+        "attachmentUrl": row["attachment_url"],
+        "createdAt": row["created_at"].isoformat() if row["created_at"] else None,
+        "updatedAt": row["updated_at"].isoformat() if row["updated_at"] else None,
+        "closedAt": row["closed_at"].isoformat() if row["closed_at"] else None,
+    }
 
 
 class UpdateTicketRequest(BaseModel):
@@ -105,27 +119,25 @@ async def create_ticket(
         attachment_url = f"/uploads/{filename}"
 
     db = get_db()
-    ticket_id = await generate_ticket_id(db)
     now = datetime.utcnow()
 
-    ticket = {
-        "ticketId": ticket_id,
-        "issueDescription": issueDescription,
-        "contact": contact,
-        "contactType": contactType,
-        "secondContact": secondContact or None,
-        "secondContactType": secondContactType or None,
-        "userName": user_name,
-        "status": "Created",
-        "notes": "",
-        "attachmentUrl": attachment_url,
-        "createdAt": now,
-        "updatedAt": now,
-    }
+    async with db.acquire() as conn:
+        ticket_id = await generate_ticket_id(conn)
+        row = await conn.fetchrow(
+            """
+            INSERT INTO tickets (
+                ticket_id, issue_description, contact, contact_type,
+                second_contact, second_contact_type, user_name,
+                status, notes, attachment_url, created_at, updated_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            RETURNING *
+            """,
+            ticket_id, issueDescription, contact, contactType,
+            secondContact or None, secondContactType or None, user_name,
+            "Created", "", attachment_url, now, now,
+        )
 
-    result = await db["tickets"].insert_one(ticket)
-    ticket["_id"] = str(result.inserted_id)
-
+    ticket = serialize(row)
     asyncio.create_task(send_ticket_created_email(ticket))
 
     return {"message": "Ticket created successfully", "ticketId": ticket_id, "ticket": ticket}
@@ -146,9 +158,11 @@ async def get_my_tickets(x_user_token: Optional[str] = Header(None)):
         raise HTTPException(status_code=400, detail="No phone number in token")
 
     db = get_db()
-    cursor = db["tickets"].find({"contact": phone}).sort("createdAt", -1)
-    tickets = [serialize(t) async for t in cursor]
-    return tickets
+    async with db.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT * FROM tickets WHERE contact = $1 ORDER BY created_at DESC", phone
+        )
+    return [serialize(r) for r in rows]
 
 
 @router.get("")
@@ -158,30 +172,39 @@ async def get_tickets(
     user=Depends(verify_token),
 ):
     db = get_db()
-    query = {}
+    conditions = []
+    params = []
 
     if status and status != "All":
-        query["status"] = status
+        params.append(status)
+        conditions.append(f"status = ${len(params)}")
 
     if search:
-        query["$or"] = [
-            {"ticketId": {"$regex": search, "$options": "i"}},
-            {"contact": {"$regex": search, "$options": "i"}},
-            {"issueDescription": {"$regex": search, "$options": "i"}},
-        ]
+        search_like = f"%{search}%"
+        params.append(search_like)
+        p1 = len(params)
+        params.append(search_like)
+        p2 = len(params)
+        params.append(search_like)
+        p3 = len(params)
+        conditions.append(f"(ticket_id ILIKE ${p1} OR contact ILIKE ${p2} OR issue_description ILIKE ${p3})")
 
-    cursor = db["tickets"].find(query).sort("createdAt", -1)
-    tickets = [serialize(t) async for t in cursor]
-    return tickets
+    where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+    async with db.acquire() as conn:
+        rows = await conn.fetch(f"SELECT * FROM tickets {where} ORDER BY created_at DESC", *params)
+
+    return [serialize(r) for r in rows]
 
 
 @router.get("/{ticket_id}")
 async def get_ticket(ticket_id: str, user=Depends(verify_token)):
     db = get_db()
-    ticket = await db["tickets"].find_one({"ticketId": ticket_id})
-    if not ticket:
+    async with db.acquire() as conn:
+        row = await conn.fetchrow("SELECT * FROM tickets WHERE ticket_id = $1", ticket_id)
+    if not row:
         raise HTTPException(status_code=404, detail="Ticket not found")
-    return serialize(ticket)
+    return serialize(row)
 
 
 @router.patch("/{ticket_id}")
@@ -190,28 +213,34 @@ async def update_ticket(ticket_id: str, body: UpdateTicketRequest, user=Depends(
         raise HTTPException(status_code=400, detail="Invalid status")
 
     db = get_db()
+    async with db.acquire() as conn:
+        existing = await conn.fetchrow("SELECT status FROM tickets WHERE ticket_id = $1", ticket_id)
+        if not existing:
+            raise HTTPException(status_code=404, detail="Ticket not found")
+        if existing["status"] == "Closed":
+            raise HTTPException(status_code=403, detail="Closed tickets cannot be edited")
 
-    # Prevent editing a closed ticket
-    existing = await db["tickets"].find_one({"ticketId": ticket_id})
-    if existing and existing.get("status") == "Closed":
-        raise HTTPException(status_code=403, detail="Closed tickets cannot be edited")
+        now = datetime.utcnow()
+        set_clauses = ["updated_at = $1"]
+        params = [now]
 
-    update = {"updatedAt": datetime.utcnow()}
-    if body.status:
-        update["status"] = body.status
-    if body.notes is not None:
-        update["notes"] = body.notes
+        if body.status:
+            params.append(body.status)
+            set_clauses.append(f"status = ${len(params)}")
+            if body.status == "Closed":
+                params.append(now)
+                set_clauses.append(f"closed_at = ${len(params)}")
+        if body.notes is not None:
+            params.append(body.notes)
+            set_clauses.append(f"notes = ${len(params)}")
 
-    ticket = await db["tickets"].find_one_and_update(
-        {"ticketId": ticket_id},
-        {"$set": update},
-        return_document=True,
-    )
+        params.append(ticket_id)
+        row = await conn.fetchrow(
+            f"UPDATE tickets SET {', '.join(set_clauses)} WHERE ticket_id = ${len(params)} RETURNING *",
+            *params,
+        )
 
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
-
-    ticket = serialize(ticket)
+    ticket = serialize(row)
     asyncio.create_task(send_ticket_status_email(ticket))
 
     return ticket

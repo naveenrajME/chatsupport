@@ -32,7 +32,8 @@ def create_token(username: str) -> str:
 @router.post("/login")
 async def login(body: LoginRequest):
     db = get_db()
-    admin = await db["admins"].find_one({"username": body.username})
+    async with db.acquire() as conn:
+        admin = await conn.fetchrow("SELECT * FROM admins WHERE username = $1", body.username)
 
     if not admin or not verify_password(body.password, admin["password"]):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
@@ -50,17 +51,19 @@ async def change_password(body: ChangePasswordRequest, user=Depends(verify_token
         raise HTTPException(status_code=400, detail="New password must be at least 6 characters")
 
     db = get_db()
-    admin = await db["admins"].find_one({"username": user["username"]})
+    async with db.acquire() as conn:
+        admin = await conn.fetchrow("SELECT * FROM admins WHERE username = $1", user["username"])
 
-    if not admin:
-        raise HTTPException(status_code=404, detail="Admin not found")
+        if not admin:
+            raise HTTPException(status_code=404, detail="Admin not found")
 
-    if not verify_password(body.currentPassword, admin["password"]):
-        raise HTTPException(status_code=401, detail="Current password is incorrect")
+        if not verify_password(body.currentPassword, admin["password"]):
+            raise HTTPException(status_code=401, detail="Current password is incorrect")
 
-    await db["admins"].update_one(
-        {"username": user["username"]},
-        {"$set": {"password": hash_password(body.newPassword)}}
-    )
+        await conn.execute(
+            "UPDATE admins SET password = $1 WHERE username = $2",
+            hash_password(body.newPassword),
+            user["username"],
+        )
 
     return {"message": "Password changed successfully"}

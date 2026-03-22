@@ -82,9 +82,17 @@ const TicketDetail = ({ ticket, onClose, onUpdate }) => {
                 </>
               )}
             </div>
-            <div>
-              <div className="text-xs text-gray-500 dark:text-gray-400 mb-1 font-medium uppercase tracking-wide">Created</div>
-              <div className="text-gray-800 dark:text-gray-200 text-sm">{formatDate(ticket.createdAt)}</div>
+            <div className="space-y-3">
+              <div>
+                <div className="text-xs text-gray-500 dark:text-gray-400 mb-1 font-medium uppercase tracking-wide">Created</div>
+                <div className="text-gray-800 dark:text-gray-200 text-sm">{formatDate(ticket.createdAt)}</div>
+              </div>
+              {ticket.closedAt && (
+                <div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400 mb-1 font-medium uppercase tracking-wide">Closed</div>
+                  <div className="text-green-700 dark:text-green-400 text-sm">{formatDate(ticket.closedAt)}</div>
+                </div>
+              )}
             </div>
           </div>
 

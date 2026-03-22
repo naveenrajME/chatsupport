@@ -6,8 +6,45 @@ import api from '../../api/axios';
 import TicketList from './TicketList';
 import TicketDetail from './TicketDetail';
 import ChangePassword from './ChangePassword';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 const STATUSES = ['All', 'Created', 'Assigned', 'Fixed', 'Closed'];
+
+const TIME_FILTERS = [
+  { label: 'All Time', value: 'all' },
+  { label: 'Today',    value: 'today' },
+  { label: '1 Week',   value: 'week' },
+  { label: '1 Month',  value: 'month' },
+  { label: 'Custom',   value: 'custom' },
+];
+
+const applyTimeFilter = (tickets, timeFilter, dateFrom, dateTo) => {
+  if (timeFilter === 'all') return tickets;
+  const now = new Date();
+  const startOf = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
+  if (timeFilter === 'today') {
+    const start = startOf(now);
+    return tickets.filter((t) => new Date(t.createdAt) >= start);
+  }
+  if (timeFilter === 'week') {
+    const start = new Date(now); start.setDate(now.getDate() - 7);
+    return tickets.filter((t) => new Date(t.createdAt) >= start);
+  }
+  if (timeFilter === 'month') {
+    const start = new Date(now); start.setMonth(now.getMonth() - 1);
+    return tickets.filter((t) => new Date(t.createdAt) >= start);
+  }
+  if (timeFilter === 'custom') {
+    const from = dateFrom ? startOf(dateFrom) : null;
+    const to   = dateTo   ? new Date(new Date(dateTo).setHours(23, 59, 59, 999)) : null;
+    return tickets.filter((t) => {
+      const d = new Date(t.createdAt);
+      return (!from || d >= from) && (!to || d <= to);
+    });
+  }
+  return tickets;
+};
 
 const StatCard = ({ label, value, color }) => (
   <div className={`bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm border-l-4 ${color}`}>
@@ -25,6 +62,9 @@ const Dashboard = () => {
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
+  const [timeFilter, setTimeFilter] = useState('all');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   const [selectedTicket, setSelectedTicket] = useState(null);
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
@@ -68,12 +108,82 @@ const Dashboard = () => {
     setTickets((prev) => prev.map((t) => (t.ticketId === updated.ticketId ? updated : t)));
   };
 
+  const handleDownloadPDF = () => {
+    const doc = new jsPDF({ orientation: 'landscape' });
+    const dateStr = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+
+    // Header bar
+    doc.setFillColor(20, 84, 118);
+    doc.rect(0, 0, doc.internal.pageSize.getWidth(), 18, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(13);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Saafe Support — Tickets Report', 14, 12);
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Generated: ${dateStr}`, doc.internal.pageSize.getWidth() - 14, 12, { align: 'right' });
+
+    // Summary row
+    doc.setTextColor(60, 60, 60);
+    doc.setFontSize(8);
+    doc.text(
+      `Total: ${stats.total}   Created: ${stats.created}   Assigned: ${stats.assigned}   Fixed: ${stats.fixed}   Closed: ${stats.closed}`,
+      14, 24
+    );
+
+    autoTable(doc, {
+      startY: 28,
+      head: [['Ticket ID', 'User', 'Issue', 'Contact', 'Type', 'Status', 'Notes', 'Created At']],
+      body: filteredTickets.map((t) => [
+        t.ticketId || '',
+        t.userName || '',
+        t.issueDescription || '',
+        t.contact || '',
+        t.contactType || '',
+        t.status || '',
+        t.notes || '',
+        t.createdAt ? new Date(t.createdAt).toLocaleString() : '',
+      ]),
+      headStyles: { fillColor: [20, 84, 118], textColor: 255, fontSize: 8, fontStyle: 'bold' },
+      bodyStyles: { fontSize: 7.5, textColor: [40, 40, 40] },
+      alternateRowStyles: { fillColor: [240, 248, 252] },
+      columnStyles: { 2: { cellWidth: 60 }, 6: { cellWidth: 40 } },
+      styles: { overflow: 'linebreak', cellPadding: 3 },
+      margin: { left: 14, right: 14 },
+    });
+
+    doc.save(`tickets_report_${new Date().toISOString().slice(0, 10)}.pdf`);
+  };
+
+  const handleDownload = () => {
+    const headers = ['Ticket ID', 'User Name', 'Issue Description', 'Contact', 'Contact Type', 'Second Contact', 'Second Contact Type', 'Status', 'Notes', 'Created At', 'Updated At', 'Closed At'];
+    const escape = (val) => {
+      const s = val == null ? '' : String(val);
+      return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const rows = filteredTickets.map((t) => [
+      t.ticketId, t.userName, t.issueDescription, t.contact, t.contactType,
+      t.secondContact, t.secondContactType, t.status, t.notes,
+      t.createdAt, t.updatedAt, t.closedAt,
+    ].map(escape).join(','));
+    const csv = [headers.join(','), ...rows].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `tickets_report_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const filteredTickets = applyTimeFilter(tickets, timeFilter, dateFrom, dateTo);
+
   const stats = {
-    total: tickets.length,
-    created: tickets.filter((t) => t.status === 'Created').length,
-    assigned: tickets.filter((t) => t.status === 'Assigned').length,
-    fixed: tickets.filter((t) => t.status === 'Fixed').length,
-    closed: tickets.filter((t) => t.status === 'Closed').length,
+    total: filteredTickets.length,
+    created: filteredTickets.filter((t) => t.status === 'Created').length,
+    assigned: filteredTickets.filter((t) => t.status === 'Assigned').length,
+    fixed: filteredTickets.filter((t) => t.status === 'Fixed').length,
+    closed: filteredTickets.filter((t) => t.status === 'Closed').length,
   };
 
   return (
@@ -162,49 +272,121 @@ const Dashboard = () => {
         {/* Ticket Inbox */}
         <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm overflow-hidden">
           {/* Toolbar */}
-          <div className="px-6 py-4 border-b border-gray-100 dark:border-gray-700 flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
-            <h2 className="font-bold text-gray-800 dark:text-white text-lg">Ticket Inbox</h2>
-            <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
-              {/* Search */}
-              <div className="relative">
-                <input
-                  type="text"
-                  placeholder="Search tickets..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  className="border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500 rounded-lg px-3 py-2 text-sm pl-9 focus:outline-none focus:ring-2 focus:ring-indigo-400 w-full sm:w-56"
-                />
-                <svg className="absolute left-2.5 top-2.5 w-4 h-4 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
-                </svg>
+          <div className="px-6 py-4 border-b border-gray-100 dark:border-gray-700 flex flex-col gap-3">
+            <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
+              <h2 className="font-bold text-gray-800 dark:text-white text-lg">Ticket Inbox</h2>
+              <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+                {/* Search */}
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="Search tickets..."
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    className="border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500 rounded-lg px-3 py-2 text-sm pl-9 focus:outline-none focus:ring-2 focus:ring-indigo-400 w-full sm:w-56"
+                  />
+                  <svg className="absolute left-2.5 top-2.5 w-4 h-4 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+                  </svg>
+                </div>
+                {/* Refresh */}
+                <button
+                  onClick={fetchTickets}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition flex items-center gap-1 ${isDark ? 'bg-gray-700 text-gray-300 hover:bg-gray-600' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3.5 h-3.5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+                  </svg>
+                  Refresh
+                </button>
+                {/* Download CSV */}
+                <button
+                  onClick={handleDownload}
+                  disabled={filteredTickets.length === 0}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed ${isDark ? 'bg-gray-700 text-gray-300 hover:bg-gray-600' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3.5 h-3.5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                  </svg>
+                  CSV
+                </button>
+                {/* Download PDF */}
+                <button
+                  onClick={handleDownloadPDF}
+                  disabled={filteredTickets.length === 0}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed ${isDark ? 'bg-gray-700 text-gray-300 hover:bg-gray-600' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3.5 h-3.5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+                  </svg>
+                  PDF
+                </button>
               </div>
+            </div>
+
+            {/* Filters Row */}
+            <div className="flex flex-col sm:flex-row gap-3">
               {/* Status Filter */}
-              <div className="flex gap-1 flex-wrap">
-                {STATUSES.map((s) => (
-                  <button
-                    key={s}
-                    onClick={() => setStatusFilter(s)}
-                    style={statusFilter === s ? {background: '#145476'} : {}}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
-                      statusFilter === s
-                        ? 'text-white'
-                        : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
-                    }`}
-                  >
-                    {s}
-                  </button>
-                ))}
+              <div className="flex flex-col gap-1">
+                <span className="text-xs text-gray-400 dark:text-gray-500 font-medium uppercase tracking-wide">Status</span>
+                <div className="flex gap-1 flex-wrap">
+                  {STATUSES.map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => setStatusFilter(s)}
+                      style={statusFilter === s ? {background: '#145476'} : {}}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                        statusFilter === s
+                          ? 'text-white'
+                          : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                      }`}
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
               </div>
-              {/* Refresh */}
-              <button
-                onClick={fetchTickets}
-                className="px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 transition flex items-center gap-1"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3.5 h-3.5">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
-                </svg>
-                Refresh
-              </button>
+
+              <div className="w-px self-stretch bg-gray-200 dark:bg-gray-600 hidden sm:block mx-1" />
+
+              {/* Time Filter */}
+              <div className="flex flex-col gap-1">
+                <span className="text-xs text-gray-400 dark:text-gray-500 font-medium uppercase tracking-wide">Period</span>
+                <div className="flex gap-1 flex-wrap items-center">
+                  {TIME_FILTERS.map((f) => (
+                    <button
+                      key={f.value}
+                      onClick={() => { setTimeFilter(f.value); if (f.value !== 'custom') { setDateFrom(''); setDateTo(''); } }}
+                      style={timeFilter === f.value ? {background: '#0bb3c1'} : {}}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                        timeFilter === f.value
+                          ? 'text-white'
+                          : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                      }`}
+                    >
+                      {f.label}
+                    </button>
+                  ))}
+                  {/* Custom Date Pickers */}
+                  {timeFilter === 'custom' && (
+                    <div className="flex items-center gap-2 ml-1">
+                      <input
+                        type="date"
+                        value={dateFrom}
+                        onChange={(e) => setDateFrom(e.target.value)}
+                        className="border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-cyan-400"
+                      />
+                      <span className="text-xs text-gray-400">to</span>
+                      <input
+                        type="date"
+                        value={dateTo}
+                        onChange={(e) => setDateTo(e.target.value)}
+                        className="border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-cyan-400"
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
 
@@ -216,7 +398,7 @@ const Dashboard = () => {
           ) : error ? (
             <div className="text-center py-20 text-red-500">{error}</div>
           ) : (
-            <TicketList tickets={tickets} onSelect={setSelectedTicket} />
+            <TicketList tickets={filteredTickets} onSelect={setSelectedTicket} />
           )}
         </div>
       </div>

@@ -8,6 +8,7 @@ const STEPS = {
   ASK_ISSUE: 'ask_issue',
   ASK_ISSUE_TEXT: 'ask_issue_text', // image received, waiting for text description
   ASK_SCREENSHOT: 'ask_screenshot',  // description received, asking for optional screenshot
+  ASK_EMAIL: 'ask_email',            // phone known via token, asking for optional email
   ASK_CONTACT: 'ask_contact',
   CONFIRM: 'confirm',
   SUBMITTING: 'submitting',
@@ -58,13 +59,10 @@ const ChatWindow = ({ token = '' }) => {
     const currentImageFile = imageFileOverride !== undefined ? imageFileOverride : ticketData.imageFile;
 
     if (userPhone) {
-      // User identified via token — skip contact step
+      // Phone known via token — ask for optional email
       await botSay('Got it! Thanks for sharing.', 800);
-      await botSay(
-        `📋 Issue: ${currentIssue}\n📱 Phone: ${userPhone}${currentImageFile ? '\n📎 Screenshot: Attached' : ''}\n\nType **yes** to submit or **no** to start over.`,
-        900
-      );
-      setStep(STEPS.CONFIRM);
+      await botSay('Would you like to add an 📧 Email ID for updates? (Type your email or **skip** to continue)', 900);
+      setStep(STEPS.ASK_EMAIL);
       setInputDisabled(false);
     } else {
       await botSay('Got it! Thanks for sharing.', 800);
@@ -72,6 +70,16 @@ const ChatWindow = ({ token = '' }) => {
       setStep(STEPS.ASK_CONTACT);
       setInputDisabled(false);
     }
+  };
+
+  const showConfirm = async (issue, imageFile, email = '') => {
+    const emailLine = email ? `\n📧 Email: ${email}` : '';
+    await botSay(
+      `📋 Issue: ${issue}\n📱 Phone: ${userPhone}${emailLine}${imageFile ? '\n📎 Screenshot: Attached' : ''}\n\nType **yes** to submit or **no** to start over.`,
+      900
+    );
+    setStep(STEPS.CONFIRM);
+    setInputDisabled(false);
   };
 
   useEffect(() => {
@@ -94,24 +102,28 @@ const ChatWindow = ({ token = '' }) => {
           if (openTicket) {
             // User has an open ticket — show status and block new ticket creation
             const statusEmoji = { Created: '🟣', Assigned: '🟡', Fixed: '🔵' };
+            const shortIssue = openTicket.issueDescription.length > 60
+              ? openTicket.issueDescription.slice(0, 60) + '…'
+              : openTicket.issueDescription;
             await botSay(
-              `You already have an open support ticket:\n\n${statusEmoji[openTicket.status] || '⚪'} **${openTicket.ticketId}**\n📌 Status: ${openTicket.status}\n📋 Issue: ${openTicket.issueDescription}\n\nOur team is already working on it. You'll be notified once it's resolved.`,
+              `You have an open ticket:\n${statusEmoji[openTicket.status] || '⚪'} **${openTicket.ticketId}** — ${openTicket.status}\n"${shortIssue}"\n\nOur team is working on it. Please wait for it to be resolved before raising a new one.`,
               1000
             );
-            await botSay('If this is a different issue, please wait for the current ticket to be closed before raising a new one.', 800);
             setStep(STEPS.DONE);
             setInputDisabled(true);
             return;
           }
 
-          // No open tickets — show history if any, then allow new ticket
+          // No open tickets — show compact history if any, then allow new ticket
           if (myTickets.length > 0) {
             const statusEmoji = { Created: '🟣', Assigned: '🟡', Fixed: '🔵', Closed: '🟢' };
-            const ticketLines = myTickets
-              .slice(0, 5)
-              .map((t) => `${statusEmoji[t.status] || '⚪'} ${t.ticketId} — ${t.status}\n   ${t.issueDescription.slice(0, 60)}${t.issueDescription.length > 60 ? '…' : ''}`)
-              .join('\n\n');
-            await botSay(`📋 Your previous tickets:\n\n${ticketLines}`, 1000);
+            const preview = myTickets.slice(0, 3);
+            const more = myTickets.length - preview.size;
+            const ticketLines = preview
+              .map((t) => `${statusEmoji[t.status] || '⚪'} ${t.ticketId} — ${t.status}`)
+              .join('\n');
+            const moreLine = myTickets.length > 3 ? `\n+${myTickets.length - 3} more` : '';
+            await botSay(`📋 Previous tickets (${myTickets.length}):\n${ticketLines}${moreLine}`, 1000);
           }
         } catch {
           // silently skip if fetch fails
@@ -210,6 +222,27 @@ const ChatWindow = ({ token = '' }) => {
 
       await botSay('Please attach a screenshot or type **skip** to continue without one.');
       setInputDisabled(false);
+      return;
+    }
+
+    // ── Step: ASK_EMAIL (phone known, asking for optional email) ──
+    if (step === STEPS.ASK_EMAIL) {
+      const trimmed = text.trim();
+      const skipped = ['skip', 'no', 'n', 'nope', 'none', 's'].includes(trimmed.toLowerCase());
+
+      if (skipped) {
+        await showConfirm(ticketData.issue, ticketData.imageFile, '');
+        return;
+      }
+
+      if (!validateEmail(trimmed)) {
+        await botSay('Please enter a valid email address or type **skip** to continue without one.');
+        setInputDisabled(false);
+        return;
+      }
+
+      setTicketData((prev) => ({ ...prev, secondContact: trimmed, secondContactType: 'email' }));
+      await showConfirm(ticketData.issue, ticketData.imageFile, trimmed);
       return;
     }
 
@@ -323,10 +356,6 @@ const ChatWindow = ({ token = '' }) => {
         <div className="w-px h-6 bg-white/30"></div>
         <div>
           <div className="font-semibold text-sm">Support Assistant</div>
-          <div className="text-xs text-white/70 flex items-center gap-1">
-            <span className="w-2 h-2 bg-green-400 rounded-full inline-block"></span>
-            Online
-          </div>
         </div>
       </div>
 

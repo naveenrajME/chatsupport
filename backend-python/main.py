@@ -14,13 +14,15 @@ from routers import auth, tickets
 
 async def seed_admin():
     db = get_db()
-    admin = await db["admins"].find_one({"username": os.getenv("ADMIN_USERNAME")})
-    if not admin:
-        await db["admins"].insert_one({
-            "username": os.getenv("ADMIN_USERNAME"),
-            "password": hash_password(os.getenv("ADMIN_PASSWORD")),
-        })
-        print("Default admin seeded")
+    async with db.acquire() as conn:
+        admin = await conn.fetchrow("SELECT id FROM admins WHERE username = $1", os.getenv("ADMIN_USERNAME"))
+        if not admin:
+            await conn.execute(
+                "INSERT INTO admins (username, password) VALUES ($1, $2)",
+                os.getenv("ADMIN_USERNAME"),
+                hash_password(os.getenv("ADMIN_PASSWORD")),
+            )
+            print("Default admin seeded")
 
 
 @asynccontextmanager
