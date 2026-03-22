@@ -96,7 +96,8 @@ const ChatInput = ({ onSend, disabled }) => {
         {/* Text input */}
         <input
           type="text"
-          className="flex-1 border border-gray-300 rounded-full px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent disabled:bg-gray-100"
+          className="flex-1 border border-gray-300 rounded-full px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:border-transparent disabled:bg-gray-100"
+          style={{'--tw-ring-color': '#0bb3c1'}}
           placeholder={disabled ? 'Chat ended' : 'Type your message...'}
           value={value}
           onChange={(e) => setValue(e.target.value)}
@@ -108,7 +109,8 @@ const ChatInput = ({ onSend, disabled }) => {
         <button
           type="submit"
           disabled={(!value.trim() && !image) || disabled}
-          className="bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 text-white rounded-full w-10 h-10 flex-shrink-0 flex items-center justify-center transition-colors"
+          className="text-white rounded-full w-10 h-10 flex-shrink-0 flex items-center justify-center transition-colors disabled:opacity-40"
+          style={{background: '#145476'}}
         >
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
             <path d="M3.478 2.405a.75.75 0 00-.926.94l2.432 7.905H13.5a.75.75 0 010 1.5H4.984l-2.432 7.905a.75.75 0 00.926.94 60.519 60.519 0 0018.445-8.986.75.75 0 000-1.218A60.517 60.517 0 003.478 2.405z" />

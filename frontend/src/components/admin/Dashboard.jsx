@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { useNavigate } from 'react-router-dom';
@@ -27,6 +27,14 @@ const Dashboard = () => {
   const [statusFilter, setStatusFilter] = useState('All');
   const [selectedTicket, setSelectedTicket] = useState(null);
   const [showChangePassword, setShowChangePassword] = useState(false);
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const profileRef = useRef(null);
+
+  useEffect(() => {
+    const handler = (e) => { if (profileRef.current && !profileRef.current.contains(e.target)) setShowProfileMenu(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
 
   const fetchTickets = useCallback(async () => {
     setLoading(true);
@@ -80,9 +88,6 @@ const Dashboard = () => {
           />
         </div>
         <div className="flex items-center gap-3">
-          <span className="text-sm text-white/80 hidden sm:block">
-            Logged in as <span className="font-semibold text-white">{admin?.username}</span>
-          </span>
           <a href="/" target="_blank" rel="noreferrer" className="text-sm text-cyan-300 hover:text-white hover:underline transition-colors">Open Chat</a>
 
           {/* Dark/Light Toggle */}
@@ -96,24 +101,51 @@ const Dashboard = () => {
                 <path d="M12 2.25a.75.75 0 01.75.75v2.25a.75.75 0 01-1.5 0V3a.75.75 0 01.75-.75zM7.5 12a4.5 4.5 0 119 0 4.5 4.5 0 01-9 0zM18.894 6.166a.75.75 0 00-1.06-1.06l-1.591 1.59a.75.75 0 101.06 1.061l1.591-1.59zM21.75 12a.75.75 0 01-.75.75h-2.25a.75.75 0 010-1.5H21a.75.75 0 01.75.75zM17.834 18.894a.75.75 0 001.06-1.06l-1.59-1.591a.75.75 0 10-1.061 1.06l1.59 1.591zM12 18a.75.75 0 01.75.75V21a.75.75 0 01-1.5 0v-2.25A.75.75 0 0112 18zM7.166 17.834a.75.75 0 00-1.06 1.06l1.59 1.591a.75.75 0 001.061-1.06l-1.59-1.591zM6 12a.75.75 0 01-.75.75H3a.75.75 0 010-1.5h2.25A.75.75 0 016 12zM6.166 6.106a.75.75 0 001.06 1.06l1.591-1.59a.75.75 0 10-1.06-1.061L6.166 6.106z" />
               </svg>
             ) : (
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 text-gray-600">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 text-white/80">
                 <path fillRule="evenodd" d="M9.528 1.718a.75.75 0 01.162.819A8.97 8.97 0 009 6a9 9 0 009 9 8.97 8.97 0 003.463-.69.75.75 0 01.981.98 10.503 10.503 0 01-9.694 6.46c-5.799 0-10.5-4.701-10.5-10.5 0-4.368 2.667-8.112 6.46-9.694a.75.75 0 01.818.162z" clipRule="evenodd" />
               </svg>
             )}
           </button>
 
-          <button
-            onClick={() => setShowChangePassword(true)}
-            className="text-sm bg-white/10 hover:bg-white/20 text-white px-3 py-1.5 rounded-lg font-medium transition"
-          >
-            Change Password
-          </button>
-          <button
-            onClick={handleLogout}
-            className="text-sm bg-red-500/80 hover:bg-red-500 text-white px-3 py-1.5 rounded-lg font-medium transition"
-          >
-            Logout
-          </button>
+          {/* Profile Dropdown */}
+          <div className="relative" ref={profileRef}>
+            <button
+              onClick={() => setShowProfileMenu((v) => !v)}
+              className="w-9 h-9 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center transition-colors font-bold text-white text-sm uppercase"
+              title={admin?.username}
+            >
+              {admin?.username?.[0] || 'A'}
+            </button>
+
+            {showProfileMenu && (
+              <div className="absolute right-0 mt-2 w-52 bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-gray-100 dark:border-gray-700 z-50 overflow-hidden">
+                {/* User info */}
+                <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-700">
+                  <div className="text-xs text-gray-400 dark:text-gray-500">Logged in as</div>
+                  <div className="font-semibold text-gray-800 dark:text-white text-sm">{admin?.username}</div>
+                </div>
+                {/* Actions */}
+                <button
+                  onClick={() => { setShowProfileMenu(false); setShowChangePassword(true); }}
+                  className="w-full text-left px-4 py-2.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center gap-2 transition-colors"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+                  </svg>
+                  Change Password
+                </button>
+                <button
+                  onClick={() => { setShowProfileMenu(false); handleLogout(); }}
+                  className="w-full text-left px-4 py-2.5 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center gap-2 transition-colors"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75" />
+                  </svg>
+                  Logout
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </nav>
 

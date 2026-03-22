@@ -1,14 +1,33 @@
-from fastapi import APIRouter, HTTPException, Depends, Query, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, Depends, Query, UploadFile, File, Form, Header
 from typing import Optional
 from datetime import datetime
 from database import get_db
 from dependencies import verify_token
 from services.email_service import send_ticket_created_email, send_ticket_status_email
 from pydantic import BaseModel
+from jose import jwt, JWTError
 import asyncio
 import aiofiles
 import os
 import uuid
+import time
+
+PARENT_APP_SECRET = os.getenv("PARENT_APP_SECRET", "")
+
+
+def decode_user_token(token: str) -> Optional[dict]:
+    """Decode and validate the parent app JWT. Returns claims or None if invalid."""
+    if not token or not PARENT_APP_SECRET:
+        return None
+    try:
+        claims = jwt.decode(token, PARENT_APP_SECRET, algorithms=["HS256"], options={"verify_exp": False})
+        # Validate custom not_after (in milliseconds)
+        not_after = claims.get("not_after")
+        if not_after and int(time.time() * 1000) > not_after:
+            return None
+        return claims
+    except JWTError:
+        return None
 
 router = APIRouter(prefix="/api/tickets", tags=["tickets"], redirect_slashes=False)
 
@@ -42,10 +61,26 @@ class UpdateTicketRequest(BaseModel):
 @router.post("", status_code=201)
 async def create_ticket(
     issueDescription: str = Form(...),
-    contact: str = Form(...),
-    contactType: str = Form(...),
+    contact: Optional[str] = Form(None),
+    contactType: Optional[str] = Form(None),
+    secondContact: Optional[str] = Form(None),
+    secondContactType: Optional[str] = Form(None),
     image: Optional[UploadFile] = File(None),
+    x_user_token: Optional[str] = Header(None),
 ):
+    # Try to identify user from parent app JWT
+    user_claims = decode_user_token(x_user_token) if x_user_token else None
+    user_name = None
+
+    if user_claims:
+        first = user_claims.get("first_name", "")
+        last = user_claims.get("last_name", "")
+        user_name = f"{first} {last}".strip() or None
+        # Use phone from token if contact not provided
+        if not contact and user_claims.get("phone_number"):
+            contact = user_claims["phone_number"]
+            contactType = "phone"
+
     if not issueDescription or not contact or not contactType:
         raise HTTPException(status_code=400, detail="All fields are required")
 
@@ -78,6 +113,9 @@ async def create_ticket(
         "issueDescription": issueDescription,
         "contact": contact,
         "contactType": contactType,
+        "secondContact": secondContact or None,
+        "secondContactType": secondContactType or None,
+        "userName": user_name,
         "status": "Created",
         "notes": "",
         "attachmentUrl": attachment_url,
@@ -91,6 +129,26 @@ async def create_ticket(
     asyncio.create_task(send_ticket_created_email(ticket))
 
     return {"message": "Ticket created successfully", "ticketId": ticket_id, "ticket": ticket}
+
+
+@router.get("/my-tickets")
+async def get_my_tickets(x_user_token: Optional[str] = Header(None)):
+    """Return tickets for the authenticated user (identified via parent app JWT)."""
+    if not x_user_token:
+        raise HTTPException(status_code=401, detail="User token required")
+
+    claims = decode_user_token(x_user_token)
+    if not claims:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    phone = claims.get("phone_number")
+    if not phone:
+        raise HTTPException(status_code=400, detail="No phone number in token")
+
+    db = get_db()
+    cursor = db["tickets"].find({"contact": phone}).sort("createdAt", -1)
+    tickets = [serialize(t) async for t in cursor]
+    return tickets
 
 
 @router.get("")

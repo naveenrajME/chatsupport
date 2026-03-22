@@ -58,6 +58,12 @@ const TicketList = ({ tickets, onSelect }) => {
                   <td className="px-4 py-3">
                     <div className="font-mono text-xs text-gray-600 dark:text-gray-400">{ticket.contact}</div>
                     <div className="text-xs text-gray-400 dark:text-gray-500 capitalize">{ticket.contactType}</div>
+                    {ticket.secondContact && (
+                      <>
+                        <div className="font-mono text-xs text-gray-600 dark:text-gray-400 mt-0.5">{ticket.secondContact}</div>
+                        <div className="text-xs text-gray-400 dark:text-gray-500 capitalize">{ticket.secondContactType}</div>
+                      </>
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${sc.class}`}>{sc.label}</span>
@@ -65,7 +71,7 @@ const TicketList = ({ tickets, onSelect }) => {
                   <td className="px-4 py-3 text-gray-500 dark:text-gray-400 text-xs whitespace-nowrap">{formatDate(ticket.createdAt)}</td>
                   <td className="px-4 py-3">
                     <button onClick={() => onSelect(ticket)} className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 font-medium text-xs hover:underline">
-                      View / Edit
+                      {ticket.status === 'Closed' ? 'View' : 'View / Edit'}
                     </button>
                   </td>
                 </tr>

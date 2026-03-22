@@ -75,6 +75,12 @@ const TicketDetail = ({ ticket, onClose, onUpdate }) => {
               <div className="text-xs text-gray-500 dark:text-gray-400 mb-1 font-medium uppercase tracking-wide">Contact</div>
               <div className="text-gray-800 dark:text-gray-200 text-sm font-mono">{ticket.contact}</div>
               <div className="text-xs text-gray-400 dark:text-gray-500 mt-0.5 capitalize">{ticket.contactType}</div>
+              {ticket.secondContact && (
+                <>
+                  <div className="text-gray-800 dark:text-gray-200 text-sm font-mono mt-1">{ticket.secondContact}</div>
+                  <div className="text-xs text-gray-400 dark:text-gray-500 mt-0.5 capitalize">{ticket.secondContactType}</div>
+                </>
+              )}
             </div>
             <div>
               <div className="text-xs text-gray-500 dark:text-gray-400 mb-1 font-medium uppercase tracking-wide">Created</div>
