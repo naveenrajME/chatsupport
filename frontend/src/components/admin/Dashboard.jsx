@@ -259,9 +259,9 @@ const Dashboard = () => {
         </div>
       </nav>
 
-      <div className="max-w-7xl mx-auto p-6">
+      <div className="max-w-7xl mx-auto p-3 md:p-6">
         {/* Stats */}
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6 [&>*:last-child]:col-span-2 md:[&>*:last-child]:col-span-1">
           <StatCard label="Total Tickets" value={stats.total} color="border-indigo-500" />
           <StatCard label="Created" value={stats.created} color="border-violet-500" />
           <StatCard label="Assigned" value={stats.assigned} color="border-yellow-500" />
@@ -272,23 +272,11 @@ const Dashboard = () => {
         {/* Ticket Inbox */}
         <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm overflow-hidden">
           {/* Toolbar */}
-          <div className="px-6 py-4 border-b border-gray-100 dark:border-gray-700 flex flex-col gap-3">
-            <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
-              <h2 className="font-bold text-gray-800 dark:text-white text-lg">Ticket Inbox</h2>
-              <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
-                {/* Search */}
-                <div className="relative">
-                  <input
-                    type="text"
-                    placeholder="Search tickets..."
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    className="border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500 rounded-lg px-3 py-2 text-sm pl-9 focus:outline-none focus:ring-2 focus:ring-indigo-400 w-full sm:w-56"
-                  />
-                  <svg className="absolute left-2.5 top-2.5 w-4 h-4 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
-                  </svg>
-                </div>
+          <div className="px-4 md:px-6 py-4 border-b border-gray-100 dark:border-gray-700 flex flex-col gap-3">
+            {/* Title + action buttons */}
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="font-bold text-gray-800 dark:text-white text-lg shrink-0">Ticket Inbox</h2>
+              <div className="flex items-center gap-2 flex-wrap justify-end">
                 {/* Refresh */}
                 <button
                   onClick={fetchTickets}
@@ -324,18 +312,32 @@ const Dashboard = () => {
               </div>
             </div>
 
-            {/* Filters Row */}
+            {/* Search — full width on mobile */}
+            <div className="relative">
+              <input
+                type="text"
+                placeholder="Search tickets..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500 rounded-lg px-3 py-2 text-sm pl-9 focus:outline-none focus:ring-2 focus:ring-indigo-400 w-full md:w-72"
+              />
+              <svg className="absolute left-2.5 top-2.5 w-4 h-4 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+              </svg>
+            </div>
+
+            {/* Filters Row — horizontal scroll on mobile */}
             <div className="flex flex-col sm:flex-row gap-3">
               {/* Status Filter */}
               <div className="flex flex-col gap-1">
                 <span className="text-xs text-gray-400 dark:text-gray-500 font-medium uppercase tracking-wide">Status</span>
-                <div className="flex gap-1 flex-wrap">
+                <div className="flex gap-1 overflow-x-auto pb-0.5 scrollbar-hide">
                   {STATUSES.map((s) => (
                     <button
                       key={s}
                       onClick={() => setStatusFilter(s)}
                       style={statusFilter === s ? {background: '#145476'} : {}}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium transition shrink-0 ${
                         statusFilter === s
                           ? 'text-white'
                           : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
@@ -352,13 +354,13 @@ const Dashboard = () => {
               {/* Time Filter */}
               <div className="flex flex-col gap-1">
                 <span className="text-xs text-gray-400 dark:text-gray-500 font-medium uppercase tracking-wide">Period</span>
-                <div className="flex gap-1 flex-wrap items-center">
+                <div className="flex gap-1 overflow-x-auto pb-0.5 scrollbar-hide items-center">
                   {TIME_FILTERS.map((f) => (
                     <button
                       key={f.value}
                       onClick={() => { setTimeFilter(f.value); if (f.value !== 'custom') { setDateFrom(''); setDateTo(''); } }}
                       style={timeFilter === f.value ? {background: '#0bb3c1'} : {}}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium transition shrink-0 ${
                         timeFilter === f.value
                           ? 'text-white'
                           : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
@@ -369,7 +371,7 @@ const Dashboard = () => {
                   ))}
                   {/* Custom Date Pickers */}
                   {timeFilter === 'custom' && (
-                    <div className="flex items-center gap-2 ml-1">
+                    <div className="flex items-center gap-2 ml-1 shrink-0">
                       <input
                         type="date"
                         value={dateFrom}

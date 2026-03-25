@@ -32,9 +32,50 @@ const TicketList = ({ tickets, onSelect }) => {
   const totalPages = Math.ceil(tickets.length / PAGE_SIZE);
   const paginated = tickets.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
+  const Pagination = () => (
+    totalPages > 1 ? (
+      <div className="flex items-center justify-between px-4 md:px-6 py-3 border-t border-gray-100 dark:border-gray-700">
+        <p className="text-xs text-gray-500 dark:text-gray-400">
+          {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, tickets.length)} of {tickets.length}
+        </p>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setPage((p) => p - 1)}
+            disabled={page === 1}
+            className="px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed transition"
+          >
+            ← Prev
+          </button>
+          {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
+            <button
+              key={p}
+              onClick={() => setPage(p)}
+              style={page === p ? { background: '#145476' } : {}}
+              className={`w-8 h-8 rounded-lg text-xs font-medium transition ${
+                page === p
+                  ? 'text-white'
+                  : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+              }`}
+            >
+              {p}
+            </button>
+          ))}
+          <button
+            onClick={() => setPage((p) => p + 1)}
+            disabled={page === totalPages}
+            className="px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed transition"
+          >
+            Next →
+          </button>
+        </div>
+      </div>
+    ) : null
+  );
+
   return (
     <div>
-      <div className="overflow-x-auto">
+      {/* ── Desktop: Table (hidden on mobile) ─────────────────────── */}
+      <div className="hidden md:block overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-gray-50 dark:bg-gray-700/50 border-b border-gray-200 dark:border-gray-700">
@@ -81,44 +122,44 @@ const TicketList = ({ tickets, onSelect }) => {
         </table>
       </div>
 
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between px-6 py-3 border-t border-gray-100 dark:border-gray-700">
-          <p className="text-xs text-gray-500 dark:text-gray-400">
-            Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, tickets.length)} of {tickets.length} tickets
-          </p>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => setPage((p) => p - 1)}
-              disabled={page === 1}
-              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed transition"
+      {/* ── Mobile: Card list (visible only on mobile) ─────────────── */}
+      <div className="md:hidden divide-y divide-gray-100 dark:divide-gray-700">
+        {paginated.map((ticket) => {
+          const sc = statusConfig[ticket.status] || statusConfig.Assigned;
+          return (
+            <div
+              key={ticket._id}
+              onClick={() => onSelect(ticket)}
+              className="p-4 hover:bg-indigo-50/50 dark:hover:bg-indigo-900/20 active:bg-indigo-100 dark:active:bg-indigo-900/30 transition-colors cursor-pointer"
             >
-              ← Prev
-            </button>
-            {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
-              <button
-                key={p}
-                onClick={() => setPage(p)}
-                style={page === p ? { background: '#145476' } : {}}
-                className={`w-8 h-8 rounded-lg text-xs font-medium transition ${
-                  page === p
-                    ? 'text-white'
-                    : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
-                }`}
-              >
-                {p}
-              </button>
-            ))}
-            <button
-              onClick={() => setPage((p) => p + 1)}
-              disabled={page === totalPages}
-              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed transition"
-            >
-              Next →
-            </button>
-          </div>
-        </div>
-      )}
+              {/* Top row: ID + Status */}
+              <div className="flex items-center justify-between mb-2">
+                <span className="font-mono text-xs font-bold text-indigo-600 dark:text-indigo-400">{ticket.ticketId}</span>
+                <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${sc.class}`}>{sc.label}</span>
+              </div>
+
+              {/* Issue */}
+              <p className="text-sm text-gray-700 dark:text-gray-300 line-clamp-2 mb-2 leading-snug">{ticket.issueDescription}</p>
+
+              {/* Bottom row: contact + date + arrow */}
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-xs font-mono text-gray-500 dark:text-gray-400">{ticket.contact}</span>
+                  <span className="text-xs text-gray-400 dark:text-gray-500 capitalize ml-1">({ticket.contactType})</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-gray-400 dark:text-gray-500">{formatDate(ticket.createdAt)}</span>
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4 text-gray-400 dark:text-gray-500 flex-shrink-0">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                  </svg>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <Pagination />
     </div>
   );
 };

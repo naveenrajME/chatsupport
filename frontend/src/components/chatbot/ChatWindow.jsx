@@ -2,13 +2,14 @@ import React, { useState, useEffect, useRef } from 'react';
 import ChatMessage from './ChatMessage';
 import ChatInput from './ChatInput';
 import api from '../../api/axios';
+import strings from './i18n';
 
 const STEPS = {
   GREETING: 'greeting',
   ASK_ISSUE: 'ask_issue',
-  ASK_ISSUE_TEXT: 'ask_issue_text', // image received, waiting for text description
-  ASK_SCREENSHOT: 'ask_screenshot',  // description received, asking for optional screenshot
-  ASK_EMAIL: 'ask_email',            // phone known via token, asking for optional email
+  ASK_ISSUE_TEXT: 'ask_issue_text',
+  ASK_SCREENSHOT: 'ask_screenshot',
+  ASK_EMAIL: 'ask_email',
   ASK_CONTACT: 'ask_contact',
   CONFIRM: 'confirm',
   SUBMITTING: 'submitting',
@@ -17,10 +18,8 @@ const STEPS = {
 
 const validateEmail = (val) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val);
 const validatePhone = (val) => /^[6-9]\d{9}$/.test(val.replace(/\s/g, ''));
-
 const botDelay = (ms = 1000) => new Promise((res) => setTimeout(res, ms));
 
-// Decode JWT payload without verification (verification happens on backend)
 const decodeTokenPayload = (token) => {
   try {
     const payload = token.split('.')[1];
@@ -30,54 +29,66 @@ const decodeTokenPayload = (token) => {
   }
 };
 
+// Resolve a bot message from a key + params using a given language strings object
+const resolveMsg = (t, key, params = []) => {
+  const val = t[key];
+  if (val === undefined) return '';
+  return typeof val === 'function' ? val(...params) : val;
+};
+
 const ChatWindow = ({ token = '' }) => {
   const userClaims = token ? decodeTokenPayload(token) : null;
   const userName = userClaims ? `${userClaims.first_name || ''} ${userClaims.last_name || ''}`.trim() : '';
   const userPhone = userClaims?.phone_number || '';
 
+  const [lang, setLang] = useState('en');
   const [messages, setMessages] = useState([]);
   const [isTyping, setIsTyping] = useState(false);
   const [step, setStep] = useState(STEPS.GREETING);
   const [inputDisabled, setInputDisabled] = useState(false);
-  const [ticketData, setTicketData] = useState({ issue: '', contact: userPhone, contactType: userPhone ? 'phone' : '', secondContact: '', secondContactType: '', imageFile: null });
+  const [ticketData, setTicketData] = useState({
+    issue: '', contact: userPhone, contactType: userPhone ? 'phone' : '',
+    secondContact: '', secondContactType: '', imageFile: null,
+  });
   const bottomRef = useRef(null);
   const initRan = useRef(false);
 
-  const addMessage = (text, sender = 'bot', imagePreview = null) => {
-    setMessages((prev) => [...prev, { id: Date.now() + Math.random(), text, sender, imagePreview }]);
+  // Always use current lang for interaction logic
+  const t = strings[lang];
+
+  // Add a user message (plain text)
+  const addUserMessage = (text, imagePreview = null) => {
+    setMessages((prev) => [...prev, { id: Date.now() + Math.random(), text, sender: 'user', imagePreview }]);
   };
 
-  const botSay = async (text, delay = 1000) => {
+  // Add a bot message — store key + params so it re-renders when lang changes
+  const addBotMessage = (key, params = []) => {
+    setMessages((prev) => [...prev, { id: Date.now() + Math.random(), msgKey: key, msgParams: params, sender: 'bot' }]);
+  };
+
+  const botSay = async (key, params = [], delay = 1000) => {
     setIsTyping(true);
     await botDelay(delay);
     setIsTyping(false);
-    addMessage(text, 'bot');
+    addBotMessage(key, params);
   };
 
-  const moveToContact = async (issueOverride = '', imageFileOverride = undefined) => {
-    const currentIssue = issueOverride || ticketData.issue;
-    const currentImageFile = imageFileOverride !== undefined ? imageFileOverride : ticketData.imageFile;
-
+  const moveToContact = async (issue, imageFile) => {
     if (userPhone) {
-      // Phone known via token — ask for optional email
-      await botSay('Got it! Thanks for sharing.', 800);
-      await botSay('Would you like to add an 📧 Email ID for updates? (Type your email or **skip** to continue)', 900);
+      await botSay('gotIt', [], 800);
+      await botSay('askEmail', [], 900);
       setStep(STEPS.ASK_EMAIL);
       setInputDisabled(false);
     } else {
-      await botSay('Got it! Thanks for sharing.', 800);
-      await botSay('Could you please share your 📧 Email ID or 📱 Mobile Number so we can follow up with you?');
+      await botSay('gotIt', [], 800);
+      await botSay('askContact');
       setStep(STEPS.ASK_CONTACT);
       setInputDisabled(false);
     }
   };
 
   const showConfirm = async (issue, imageFile, email = '') => {
-    const emailLine = email ? `\n📧 Email: ${email}` : '';
-    await botSay(
-      `📋 Issue: ${issue}\n📱 Phone: ${userPhone}${emailLine}${imageFile ? '\n📎 Screenshot: Attached' : ''}\n\nType **yes** to submit or **no** to start over.`,
-      900
-    );
+    await botSay('confirmBody', [issue, userPhone, email, !!imageFile], 900);
     setStep(STEPS.CONFIRM);
     setInputDisabled(false);
   };
@@ -87,50 +98,38 @@ const ChatWindow = ({ token = '' }) => {
     initRan.current = true;
     const init = async () => {
       setInputDisabled(true);
-      const greeting = userName ? `👋 Hi ${userName}! Welcome to Saafe Support.` : '👋 Hi there! Welcome to Saafe Support. I\'m here to help you.';
-      await botSay(greeting, 800);
+      await botSay('greeting', [userName], 800);
 
-      // If user is identified via token, fetch their previous tickets
       if (token && userPhone) {
         try {
-          const res = await api.get('/tickets/my-tickets', {
-            headers: { 'x-user-token': token },
-          });
+          const res = await api.get('/tickets/my-tickets', { headers: { 'x-user-token': token } });
           const myTickets = res.data;
-          const openTicket = myTickets.find((t) => t.status !== 'Closed');
+          const openTicket = myTickets.find((tk) => tk.status !== 'Closed');
 
           if (openTicket) {
-            // User has an open ticket — show status and block new ticket creation
             const statusEmoji = { Created: '🟣', Assigned: '🟡', Fixed: '🔵' };
             const shortIssue = openTicket.issueDescription.length > 60
               ? openTicket.issueDescription.slice(0, 60) + '…'
               : openTicket.issueDescription;
-            await botSay(
-              `You have an open ticket:\n${statusEmoji[openTicket.status] || '⚪'} **${openTicket.ticketId}** — ${openTicket.status}\n"${shortIssue}"\n\nOur team is working on it. Please wait for it to be resolved before raising a new one.`,
-              1000
-            );
+            await botSay('openTicket', [statusEmoji[openTicket.status] || '⚪', openTicket.ticketId, openTicket.status, shortIssue], 1000);
             setStep(STEPS.DONE);
             setInputDisabled(true);
             return;
           }
 
-          // No open tickets — show compact history if any, then allow new ticket
           if (myTickets.length > 0) {
             const statusEmoji = { Created: '🟣', Assigned: '🟡', Fixed: '🔵', Closed: '🟢' };
             const preview = myTickets.slice(0, 3);
-            const more = myTickets.length - preview.size;
-            const ticketLines = preview
-              .map((t) => `${statusEmoji[t.status] || '⚪'} ${t.ticketId} — ${t.status}`)
-              .join('\n');
+            const ticketLines = preview.map((tk) => `${statusEmoji[tk.status] || '⚪'} ${tk.ticketId} — ${tk.status}`).join('\n');
             const moreLine = myTickets.length > 3 ? `\n+${myTickets.length - 3} more` : '';
-            await botSay(`📋 Previous tickets (${myTickets.length}):\n${ticketLines}${moreLine}`, 1000);
+            await botSay('prevTickets', [myTickets.length, ticketLines + moreLine], 1000);
           }
         } catch {
-          // silently skip if fetch fails
+          // silently skip
         }
       }
 
-      await botSay('Could you please describe the issue or problem you\'re facing?', 1000);
+      await botSay('askIssue', [], 1000);
       setStep(STEPS.ASK_ISSUE);
       setInputDisabled(false);
     };
@@ -143,128 +142,112 @@ const ChatWindow = ({ token = '' }) => {
 
   const handleUserSend = async (text, imageFile = null) => {
     const imagePreview = imageFile ? URL.createObjectURL(imageFile) : null;
-    addMessage(text, 'user', imagePreview);
+    addUserMessage(text, imagePreview);
     setInputDisabled(true);
 
-    // ── Step: ASK_ISSUE ──────────────────────────────────────────
+    // ── ASK_ISSUE ─────────────────────────────────────────────────
     if (step === STEPS.ASK_ISSUE) {
       const hasText = text && text.trim().length >= 5;
       const hasImage = !!imageFile;
 
       if (!text && !imageFile) {
-        await botSay('Please describe your issue or attach a screenshot so I can help you.');
+        await botSay('askIssueOrImage');
         setInputDisabled(false);
         return;
       }
-
       if (!hasText && !hasImage) {
-        await botSay('Please describe your issue in a bit more detail (at least a few words).');
+        await botSay('askIssueDetail');
         setInputDisabled(false);
         return;
       }
-
       if (hasImage && !hasText) {
-        // Image sent without text — save image and ask for description
         setTicketData((prev) => ({ ...prev, imageFile }));
-        await botSay('Thanks for the screenshot! Could you also describe the issue in a few words so our team knows what to look into?', 900);
+        await botSay('askIssueText', [], 900);
         setStep(STEPS.ASK_ISSUE_TEXT);
         setInputDisabled(false);
         return;
       }
-
       if (hasText && hasImage) {
-        // Both text and image provided — skip screenshot step
         setTicketData((prev) => ({ ...prev, issue: text.trim(), imageFile }));
         await moveToContact(text.trim(), imageFile);
         return;
       }
-
-      // Text only — ask for screenshot before contact
       setTicketData((prev) => ({ ...prev, issue: text.trim() }));
-      await botSay('Thanks! Do you have a screenshot of the issue? If yes, attach it below. If not, type **skip** to continue.', 900);
+      await botSay('askScreenshot', [], 900);
       setStep(STEPS.ASK_SCREENSHOT);
       setInputDisabled(false);
       return;
     }
 
-    // ── Step: ASK_ISSUE_TEXT (got image, waiting for description) ─
+    // ── ASK_ISSUE_TEXT ────────────────────────────────────────────
     if (step === STEPS.ASK_ISSUE_TEXT) {
-      const hasText = text && text.trim().length >= 3;
+      const trimmed = text.trim();
+      const skipped = t.skipWords.includes(trimmed.toLowerCase());
 
-      if (!hasText) {
-        await botSay('Just a brief description will do — even a few words help our team understand the issue.');
+      if (skipped || !trimmed) {
+        const issue = 'Screenshot attached';
+        setTicketData((prev) => ({ ...prev, issue }));
+        await moveToContact(issue, ticketData.imageFile);
+        return;
+      }
+      if (trimmed.length < 3) {
+        await botSay('askIssueTextRetry');
         setInputDisabled(false);
         return;
       }
-
-      setTicketData((prev) => ({ ...prev, issue: text.trim() }));
-      await moveToContact(text.trim(), ticketData.imageFile);
+      setTicketData((prev) => ({ ...prev, issue: trimmed }));
+      await moveToContact(trimmed, ticketData.imageFile);
       return;
     }
 
-    // ── Step: ASK_SCREENSHOT ──────────────────────────────────────
+    // ── ASK_SCREENSHOT ────────────────────────────────────────────
     if (step === STEPS.ASK_SCREENSHOT) {
-      const skipped = ['skip', 'no', 'n', 'nope', 'none'].includes(text.toLowerCase().trim());
-
+      const skipped = t.skipWords.includes(text.toLowerCase().trim());
       if (imageFile) {
-        // User attached an image
         setTicketData((prev) => ({ ...prev, imageFile }));
-        await botSay('Got it! Screenshot saved.', 700);
+        await botSay('screenshotSaved', [], 700);
         await moveToContact(ticketData.issue, imageFile);
         return;
       }
-
       if (skipped || (!imageFile && text)) {
-        // User chose to skip
         await moveToContact(ticketData.issue, null);
         return;
       }
-
-      await botSay('Please attach a screenshot or type **skip** to continue without one.');
+      await botSay('askScreenshotRetry');
       setInputDisabled(false);
       return;
     }
 
-    // ── Step: ASK_EMAIL (phone known, asking for optional email) ──
+    // ── ASK_EMAIL ─────────────────────────────────────────────────
     if (step === STEPS.ASK_EMAIL) {
       const trimmed = text.trim();
-      const skipped = ['skip', 'no', 'n', 'nope', 'none', 's'].includes(trimmed.toLowerCase());
-
+      const skipped = t.skipWords.includes(trimmed.toLowerCase());
       if (skipped) {
         await showConfirm(ticketData.issue, ticketData.imageFile, '');
         return;
       }
-
       if (!validateEmail(trimmed)) {
-        await botSay('Please enter a valid email address or type **skip** to continue without one.');
+        await botSay('invalidEmail');
         setInputDisabled(false);
         return;
       }
-
       setTicketData((prev) => ({ ...prev, secondContact: trimmed, secondContactType: 'email' }));
       await showConfirm(ticketData.issue, ticketData.imageFile, trimmed);
       return;
     }
 
-    // ── Step: ASK_CONTACT ─────────────────────────────────────────
+    // ── ASK_CONTACT ───────────────────────────────────────────────
     if (step === STEPS.ASK_CONTACT) {
       const trimmed = text.trim();
-      let contactType = '';
-      let contact = trimmed;
-
-      // Extract email and phone from the message
       const emailMatch = trimmed.match(/[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+/);
       const phoneMatch = trimmed.match(/[6-9]\d{9}/);
-
-      let secondContact = '';
-      let secondContactType = '';
+      let contact = trimmed, contactType = '', secondContact = '', secondContactType = '';
 
       if (validateEmail(trimmed)) {
         contact = trimmed; contactType = 'email';
       } else if (validatePhone(trimmed)) {
         contact = trimmed; contactType = 'phone';
       } else if (emailMatch && phoneMatch) {
-        // Both found — email as primary, phone as secondary
         contact = emailMatch[0]; contactType = 'email';
         secondContact = phoneMatch[0]; secondContactType = 'phone';
       } else if (emailMatch) {
@@ -272,34 +255,28 @@ const ChatWindow = ({ token = '' }) => {
       } else if (phoneMatch) {
         contact = phoneMatch[0]; contactType = 'phone';
       } else {
-        await botSay('Please enter a valid 10-digit mobile number (starting with 6-9) or a valid email address.\n\nExample: 9876543210 or name@email.com');
+        await botSay('invalidContact');
         setInputDisabled(false);
         return;
       }
 
       setTicketData((prev) => ({ ...prev, contact, contactType, secondContact, secondContactType }));
-
-      await botSay('Perfect! Here\'s a summary of your ticket:', 800);
-      // Read issue and imageFile from current ticketData via closure
-      await botSay(
-        `📋 Issue: ${ticketData.issue}\n📧 ${contactType === 'email' ? 'Email' : 'Phone'}: ${contact}${secondContact ? `\n📱 ${secondContactType === 'phone' ? 'Phone' : 'Email'}: ${secondContact}` : ''}${ticketData.imageFile ? '\n📎 Screenshot: Attached' : ''}\n\nType **yes** to submit or **no** to start over.`,
-        1000
-      );
+      await botSay('confirmIntro', [], 800);
+      await botSay('confirmBodyNoPhone', [ticketData.issue, contactType, contact, secondContact, secondContactType, !!ticketData.imageFile], 1000);
       setStep(STEPS.CONFIRM);
       setInputDisabled(false);
       return;
     }
 
-    // ── Step: CONFIRM ─────────────────────────────────────────────
+    // ── CONFIRM ───────────────────────────────────────────────────
     if (step === STEPS.CONFIRM) {
       const lower = text.toLowerCase().trim();
-      const isYes = ['yes', 'y', 'confirm', 'submit', 'ok', 'okay', 'sure', 'yep', 'yeah'].includes(lower);
-      const isNo = ['no', 'n', 'cancel', 'restart', 'reset', 'start over'].includes(lower);
+      const isYes = t.yesWords.includes(lower);
+      const isNo = t.noWords.includes(lower);
 
       if (isYes) {
         setStep(STEPS.SUBMITTING);
-        await botSay('Submitting your ticket... ⏳', 600);
-
+        await botSay('submitting', [], 600);
         try {
           const formData = new FormData();
           formData.append('issueDescription', ticketData.issue);
@@ -310,20 +287,14 @@ const ChatWindow = ({ token = '' }) => {
             formData.append('secondContactType', ticketData.secondContactType);
           }
           if (ticketData.imageFile) formData.append('image', ticketData.imageFile);
-
           const headers = { 'Content-Type': 'multipart/form-data' };
           if (token) headers['x-user-token'] = token;
-
           const res = await api.post('/tickets', formData, { headers });
-
-          await botSay(
-            `✅ Your support ticket has been created!\n\n🎫 Ticket ID: ${res.data.ticketId}\n\nOur team will reach out to you shortly. Thank you!`,
-            800
-          );
+          await botSay('success', [res.data.ticketId], 800);
           setStep(STEPS.DONE);
           setInputDisabled(true);
-        } catch (err) {
-          await botSay('Sorry, there was an error submitting your ticket. Please try again.');
+        } catch {
+          await botSay('submitError');
           setStep(STEPS.CONFIRM);
           setInputDisabled(false);
         }
@@ -332,36 +303,52 @@ const ChatWindow = ({ token = '' }) => {
 
       if (isNo) {
         setTicketData({ issue: '', contact: userPhone, contactType: userPhone ? 'phone' : '', secondContact: '', secondContactType: '', imageFile: null });
-        await botSay('No problem! Let\'s start over.', 600);
-        await botSay('Please describe your issue or attach a screenshot.');
+        await botSay('startOver', [], 600);
+        await botSay('startOverPrompt');
         setStep(STEPS.ASK_ISSUE);
         setInputDisabled(false);
         return;
       }
 
-      await botSay('Type **yes** to submit the ticket or **no** to start over.');
+      await botSay('confirmPrompt');
       setInputDisabled(false);
     }
   };
 
+  // Resolve all bot messages in the current language at render time
+  const displayMessages = messages.map((msg) => {
+    if (msg.sender === 'bot' && msg.msgKey) {
+      return { ...msg, text: resolveMsg(strings[lang], msg.msgKey, msg.msgParams) };
+    }
+    return msg;
+  });
+
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="text-white px-4 py-3 flex items-center gap-3 flex-shrink-0" style={{background: '#145476'}}>
+      <div className="text-white px-4 py-3 flex items-center gap-3 flex-shrink-0" style={{ background: '#145476' }}>
         <img
           src="https://sandbox.saafe.in/static/media/saafe_light.a6365baa.png"
           alt="Saafe"
           className="h-8 object-contain brightness-0 invert flex-shrink-0"
         />
         <div className="w-px h-6 bg-white/30"></div>
-        <div>
+        <div className="flex-1">
           <div className="font-semibold text-sm">Support Assistant</div>
         </div>
+        {/* Language Toggle */}
+        <button
+          onClick={() => setLang((prev) => (prev === 'en' ? 'hi' : 'en'))}
+          className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-white/15 hover:bg-white/25 transition-colors border border-white/20"
+          title={lang === 'en' ? 'Switch to Hindi' : 'Switch to English'}
+        >
+          <span>{lang === 'en' ? 'हिं' : 'EN'}</span>
+        </button>
       </div>
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 bg-gray-50">
-        {messages.map((msg) => (
+        {displayMessages.map((msg) => (
           <ChatMessage key={msg.id} message={msg} />
         ))}
         {isTyping && <ChatMessage isTyping />}

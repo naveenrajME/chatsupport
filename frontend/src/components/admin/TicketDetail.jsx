@@ -33,8 +33,8 @@ const TicketDetail = ({ ticket, onClose, onUpdate }) => {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-lg">
+    <div className="fixed inset-0 bg-black/40 flex items-end md:items-center justify-center z-50 md:p-4">
+      <div className="bg-white dark:bg-gray-800 rounded-t-2xl md:rounded-2xl shadow-2xl w-full md:max-w-lg">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-700">
           <div>
@@ -50,7 +50,7 @@ const TicketDetail = ({ ticket, onClose, onUpdate }) => {
         </div>
 
         {/* Body */}
-        <div className="p-6 space-y-4 overflow-y-auto max-h-[60vh]">
+        <div className="p-4 md:p-6 space-y-4 overflow-y-auto max-h-[70vh] md:max-h-[60vh]">
           <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4">
             <div className="text-xs text-gray-500 dark:text-gray-400 mb-1 font-medium uppercase tracking-wide">Issue Description</div>
             <div className="text-gray-800 dark:text-gray-200 text-sm leading-relaxed">{ticket.issueDescription}</div>
